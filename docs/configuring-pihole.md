@@ -29,7 +29,7 @@ Pi-hole is a DNS sinkhole which blocks ads and trackers for every device that us
 See the project's [documentation](https://docs.pi-hole.net/) to learn what Pi-hole does and why it might be useful to you.
 
 > [!WARNING]
-> Running a public DNS server is not advisable. You'd better install Pi-hole in a trusted local network, or set its port exposure (via the variables you can find on the section below about [opening ports](#open-ports)) so that you don't expose your DNS server publicly to the whole world.
+> Running a public DNS server is not advisable. You should install Pi-hole in a trusted local network, or set its port exposure (via the variables you can find on the section below about [opening ports](#open-ports)) so that you don't expose your DNS server publicly to the whole world.
 
 ## Prerequisites
 
