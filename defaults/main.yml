@@ -44,6 +44,9 @@ pihole_container_network_deletion_enabled: true
 # Specify how the container publishes its HTTP port (as defined by `pihole_container_http_port`).
 #
 # Takes an "<ip>:<port>" or "<port>" value (e.g. "127.0.0.1:8080"), or empty string to not expose.
+#
+# The web interface is at `/admin/` on this port. With a `pihole_path_prefix` other than `/`,
+# Pi-hole expects a reverse-proxy to strip the prefix, so the web interface does not work here.
 pihole_container_http_host_bind_port: ""
 
 # The port number in the container
@@ -51,14 +54,14 @@ pihole_container_http_port: 80
 
 # Specify how the container publishes its TCP DNS port
 #
-# Takes an "<ip>:<port>" or "<port>" value (e.g. "192.168.1.15:53").
-# There is no default: Pi-hole answers every client that reaches it, and a bare port number
-# publishes it on all network interfaces of the server, public ones included.
+# Takes an "<ip>:<port>" value (e.g. "192.168.1.15:53"), or an empty string to not expose.
+# The address cannot be left out: Pi-hole answers every client that reaches it, so publishing
+# on all network interfaces, public ones included, has to be asked for (`0.0.0.0:53`).
 pihole_container_dns_tcp_bind_port: ""
 
 # Specify how the container publishes its UDP DNS port (as defined by `pihole_container_dns_tcp_bind_port`).
 #
-# Takes an "<ip>:<port>" or "<port>" value (e.g. "127.0.0.1:53"), just a port number or an empty string to not expose.
+# Takes an "<ip>:<port>" value (e.g. "192.168.1.15:53"), or an empty string to not expose.
 pihole_container_dns_udp_bind_port: "{{ pihole_container_dns_tcp_bind_port }}"
 
 # A list of additional container networks that the container would be connected to.

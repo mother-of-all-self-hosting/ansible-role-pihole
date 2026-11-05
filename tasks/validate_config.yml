@@ -14,8 +14,19 @@
     - pihole_uid
     - pihole_gid
     - pihole_hostname
-    - pihole_container_dns_tcp_bind_port
     - pihole_environment_variables_ftlconf_webserver_api_password
+
+# Pi-hole answers every client that reaches it, and Docker publishes a port given
+# without an address on all network interfaces, bypassing the host's firewall.
+- name: Fail if a Pi-hole DNS port is published without an address
+  ansible.builtin.fail:
+    msg: >-
+      `{{ item }}` (`{{ lookup('vars', item) }}`) needs the address to publish on (e.g. `192.168.1.15:53`).
+      Use `0.0.0.0:53` to publish on every IPv4 address of the server.
+  when: "lookup('vars', item) | string | length > 0 and ':' not in lookup('vars', item) | string"
+  with_items:
+    - pihole_container_dns_tcp_bind_port
+    - pihole_container_dns_udp_bind_port
 
 - name: Validate Pi-hole Traefik configuration
   when: pihole_container_labels_traefik_enabled | bool

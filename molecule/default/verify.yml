@@ -258,6 +258,16 @@
             fail_msg: "The additional volume did not carry the marker into the container"
             success_msg: "The additional volume carries the marker into the container"
 
+        # The probes below ask 127.0.0.1, which would answer just as well if the
+        # ports were published on every interface.
+        - name: Assert that the DNS ports are published on the configured address only
+          ansible.builtin.assert:
+            that:
+              - "pihole_container.HostConfig.PortBindings['53/tcp'] == [{'HostIp': '127.0.0.1', 'HostPort': '53'}]"
+              - "pihole_container.HostConfig.PortBindings['53/udp'] == [{'HostIp': '127.0.0.1', 'HostPort': '53'}]"
+            fail_msg: "The DNS ports are published as {{ pihole_container.HostConfig.PortBindings }}"
+            success_msg: "53/tcp and 53/udp are published on 127.0.0.1 only"
+
         - name: Assert that the container image is the pinned version
           ansible.builtin.assert:
             that: pihole_container.Config.Image == 'docker.io/pihole/pihole:' ~ pihole_defaults.pihole_version
@@ -326,7 +336,7 @@
         # as well, so the oldest one is the server.
         - name: Ask the Pi-hole container which timezone and user pihole-FTL runs in
           ansible.builtin.command:
-            cmd: docker exec pihole sh -c 'pid=$(pgrep -o -x pihole-FTL); date +%Z; stat -c %u /proc/$pid; stat -c %g /proc/$pid'
+            cmd: docker exec pihole sh -c 'pid=$(pgrep -o -x pihole-FTL) || { echo "pihole-FTL is not running" >&2; exit 1; }; date +%Z; stat -c %u /proc/$pid; stat -c %g /proc/$pid'
           register: pihole_process_identity
           changed_when: false
 
@@ -389,8 +399,17 @@
 
         # Blocking is what Pi-hole is for. Adding a name through the API and then
         # seeing the DNS server block it also ties the two listeners together. An
-        # earlier verify run against the same instance has added it already.
-        - name: Add a name to the Pi-hole deny list
+        # earlier verify run against the same instance may have added it already,
+        # so it is removed first (404 when it is not there).
+        - name: Remove the name from the Pi-hole deny list
+          ansible.builtin.uri:
+            url: "{{ pihole_verify_api_url }}/domains/deny/exact/{{ pihole_verify_blocked_name }}"
+            method: DELETE
+            headers:
+              sid: "{{ pihole_auth.json.session.sid }}"
+            status_code: [204, 404]
+
+        - name: Add the name to the Pi-hole deny list
           ansible.builtin.uri:
             url: "{{ pihole_verify_api_url }}/domains/deny/exact"
             method: POST
@@ -399,11 +418,7 @@
             body_format: json
             body:
               domain: "{{ pihole_verify_blocked_name }}"
-            status_code: [201, 400]
-          register: pihole_deny
-          failed_when: >-
-            pihole_deny.status != 201
-            and 'already present' not in (pihole_deny.json | default({})).get('error', {}).get('hint', '')
+            status_code: [201]
 
         - name: Resolve the denied name through Pi-hole (up to 60s)
           ansible.builtin.command:

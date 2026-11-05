@@ -40,13 +40,13 @@ Pi-hole uses the following ports on your server:
 - `53` over **TCP**, controlled by `pihole_container_dns_tcp_bind_port` — used for DNS over TCP
 - `53` over **UDP**, controlled by `pihole_container_dns_udp_bind_port` (which follows the TCP one by default) — used for DNS over UDP
 
-There is no default, as Pi-hole answers every client which reaches it. To expose these ports on the address of the server in your local network or VPN, add the following configuration to your `vars.yml` file, replacing `192.168.1.15` with that address:
+By default, these ports are not exposed, as Pi-hole answers every client which reaches it. To expose them on the address of the server in your local network or VPN, add the following configuration to your `vars.yml` file, replacing `192.168.1.15` with that address:
 
 ```yaml
 pihole_container_dns_tcp_bind_port: '192.168.1.15:53'
 ```
 
-Docker opens the ports in the server's firewall by itself, bypassing rules set with tools such as `ufw`. Setting just `53` therefore exposes the DNS server on **all network interfaces**, including public ones. It also fails on servers where `systemd-resolved` listens on port `53` (e.g. Ubuntu), unless its stub resolver is [disabled](https://docs.pi-hole.net/docker/tips-and-tricks/#disable-systemd-resolved-port-53).
+The address is required. Docker opens the ports in the server's firewall by itself, bypassing rules set with tools such as `ufw`, so `0.0.0.0:53` exposes the DNS server on **all network interfaces**, including public ones. It also fails on servers where `systemd-resolved` listens on port `53` (e.g. Ubuntu), unless its stub resolver is [disabled](https://docs.pi-hole.net/docker/tips-and-tricks/#disable-systemd-resolved-port-53).
 
 ## Adjusting the playbook configuration
 
