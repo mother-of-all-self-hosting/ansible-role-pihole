@@ -24,3 +24,21 @@
     - name: Ensure Docker is installed for Pi-hole Molecule tests preparation
       ansible.builtin.include_role:
         name: ansible-role-docker
+
+    # Bind-mounted into the Pi-hole container through
+    # `pihole_container_additional_volumes_custom`. The role does not create the source
+    # of an additional volume, so it has to exist before the container is
+    # created, or `docker create` refuses the bind. verify.yml reads the marker
+    # file back from inside the container, which only works if the systemd unit
+    # really carries the additional volumes.
+    - name: Ensure the additional volume directory exists for Pi-hole Molecule tests
+      ansible.builtin.file:
+        path: "{{ pihole_molecule_extra_volume_src }}"
+        state: directory
+        mode: "0755"
+
+    - name: Ensure a marker file exists in the Pi-hole Molecule additional volume
+      ansible.builtin.copy:
+        content: "{{ pihole_molecule_extra_volume_marker }}\n"
+        dest: "{{ pihole_molecule_extra_volume_src }}/{{ pihole_molecule_marker_filename }}"
+        mode: "0644"

@@ -29,26 +29,24 @@ Pi-hole is a DNS sinkhole which blocks ads and trackers for every device that us
 See the project's [documentation](https://docs.pi-hole.net/) to learn what Pi-hole does and why it might be useful to you.
 
 > [!WARNING]
-> Running a public DNS server is not advisable. You'd better install Pi-hole in a trusted local network, or adjust its port exposure (via the variables you can find on the section below about [opening ports](#open-ports)) so that you don't expose your DNS server publicly to the whole world.
+> Running a public DNS server is not advisable. You'd better install Pi-hole in a trusted local network, or set its port exposure (via the variables you can find on the section below about [opening ports](#open-ports)) so that you don't expose your DNS server publicly to the whole world.
 
 ## Prerequisites
 
 ### Open ports
 
-You may need to open the following ports on your server:
+Pi-hole uses the following ports on your server:
 
 - `53` over **TCP**, controlled by `pihole_container_dns_tcp_bind_port` — used for DNS over TCP
-- `53` over **UDP**, controlled by `pihole_container_dns_udp_bind_port` — used for DNS over UDP
+- `53` over **UDP**, controlled by `pihole_container_dns_udp_bind_port` (which follows the TCP one by default) — used for DNS over UDP
 
-Docker automatically opens these ports in the server's firewall, so you likely don't need to do anything. If you use another firewall in front of the server, you may need to adjust it.
-
-By default, those ports will be exposed by the container on **all network interfaces**. To expose these ports only on **some** network interfaces, add the following configuration to your `vars.yml` file:
+There is no default, as Pi-hole answers every client which reaches it. To expose these ports on the address of the server in your local network or VPN, add the following configuration to your `vars.yml` file, replacing `192.168.1.15` with that address:
 
 ```yaml
-# Expose only on 192.168.1.15
 pihole_container_dns_tcp_bind_port: '192.168.1.15:53'
-pihole_container_dns_udp_bind_port: '192.168.1.15:53'
 ```
+
+Docker opens the ports in the server's firewall by itself, bypassing rules set with tools such as `ufw`. Setting just `53` therefore exposes the DNS server on **all network interfaces**, including public ones. It also fails on servers where `systemd-resolved` listens on port `53` (e.g. Ubuntu), unless its stub resolver is [disabled](https://docs.pi-hole.net/docker/tips-and-tricks/#disable-systemd-resolved-port-53).
 
 ## Adjusting the playbook configuration
 

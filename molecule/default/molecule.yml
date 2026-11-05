@@ -40,6 +40,18 @@ provisioner:
         pihole_debug_service_enabled: false
         pihole_restarts_check_enabled: true
 
+        # The host directory mounted into the container through
+        # `pihole_container_additional_volumes_custom`, and the file placed in it by
+        # prepare.yml. Reading that file from inside the container is what
+        # proves the additional volumes reach the systemd unit rather than
+        # being merely declared in defaults/main.yml.
+        pihole_molecule_extra_volume_src: /pihole-molecule-extra
+        pihole_molecule_extra_volume_dst: /molecule-extra
+        pihole_molecule_extra_volume_marker: only-a-real-bind-mount-can-read-this
+
+        # The name of the marker file prepare.yml places in that directory.
+        pihole_molecule_marker_filename: pihole-molecule-marker.txt
+
         # Variables for Pi-hole
         #
         # Deliberately not the image's own 1000:1000, so that Pi-hole running as
@@ -66,7 +78,20 @@ provisioner:
         # not running there), so the real DNS port can be used.
         pihole_container_dns_tcp_bind_port: "127.0.0.1:53"
 
+        pihole_container_additional_volumes_custom:
+          - type: bind
+            src: "{{ pihole_molecule_extra_volume_src }}"
+            dst: "{{ pihole_molecule_extra_volume_dst }}"
+            options: readonly
+
         pihole_container_labels_traefik_enabled: true
+
+        # Off by default, so it has to be switched on here for the basic-auth
+        # middleware in templates/labels.j2 to be exercised at all. Molecule
+        # interpolates dollar signs in this file, so the ones in the hash are
+        # written doubled.
+        pihole_container_labels_traefik_middleware_basic_auth_enabled: true
+        pihole_container_labels_traefik_middleware_basic_auth_users: "molecule:$$apr1$$molecule$$71DtE3xj/6PCMkh0SmxZ61"
 
         # Neither the role's default of UTC nor the test host's zone, so that the
         # timezone the container ends up in can only have come from

@@ -51,8 +51,10 @@ pihole_container_http_port: 80
 
 # Specify how the container publishes its TCP DNS port
 #
-# Takes an "<ip>:<port>" or "<port>" value (e.g. "127.0.0.1:53"), just a port number or an empty string to not expose.
-pihole_container_dns_tcp_bind_port: "53"
+# Takes an "<ip>:<port>" or "<port>" value (e.g. "192.168.1.15:53").
+# There is no default: Pi-hole answers every client that reaches it, and a bare port number
+# publishes it on all network interfaces of the server, public ones included.
+pihole_container_dns_tcp_bind_port: ""
 
 # Specify how the container publishes its UDP DNS port (as defined by `pihole_container_dns_tcp_bind_port`).
 #
@@ -136,7 +138,9 @@ pihole_container_extra_arguments_custom: []
 # Learn more about it is here:
 # - https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-XSS-Protection
 # - https://portswigger.net/web-security/cross-site-scripting/reflected
-pihole_http_header_xss_protection: "1; mode=block"
+#
+# We intentionally don't set this, because Pi-hole does it and we'd rather not override its (better) value.
+pihole_http_header_xss_protection: ""
 
 # Specifies the value of the `X-Content-Type-Options` header.
 # See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Content-Type-Options

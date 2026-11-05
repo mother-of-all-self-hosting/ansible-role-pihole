@@ -14,6 +14,7 @@
     - pihole_uid
     - pihole_gid
     - pihole_hostname
+    - pihole_container_dns_tcp_bind_port
     - pihole_environment_variables_ftlconf_webserver_api_password
 
 - name: Validate Pi-hole Traefik configuration

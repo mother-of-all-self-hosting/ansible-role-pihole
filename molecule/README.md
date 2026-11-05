@@ -49,7 +49,7 @@ Currently there is one testing scenario available.
 
 Tests a standard Pi-hole installation.
 
-The scenario configures Pi-hole with values it would not pick by itself, so that every assertion is attributable to the role: a path prefix, a container port and a timezone that are neither the defaults nor the test host's, a fixed password, a uid the test image does not carry, and a local DNS record through the additional environment variables. It then asserts that the running Pi-hole accepts that password, reports the version [`defaults/main.yml`](../defaults/main.yml) pins, redirects its start page under the prefix, runs as the role's user with only the capabilities the role grants, answers the local DNS record and blocks a name added to its deny list, and keeps its database under the role's data path.
+The scenario configures Pi-hole with values it would not pick by itself, so that every assertion is attributable to the role: a path prefix, a container port and a timezone that are neither the defaults nor the test host's, a fixed password, a uid the test image does not carry, a local DNS record through the additional environment variables, and an additional volume whose marker file is read back from inside the container. It then asserts that the running Pi-hole accepts that password, reports the version [`defaults/main.yml`](../defaults/main.yml) pins, redirects its start page under the prefix, runs as the role's user with only the capabilities the role grants, answers the local DNS record over UDP and TCP and blocks a name added to its deny list, and keeps its database under the role's data path.
 
 ## Running
 

@@ -30,6 +30,7 @@
     pihole_verify_path_prefix: /pihole-ui
     pihole_verify_http_port: 8282
     pihole_verify_password: molecule-password
+    pihole_verify_basic_auth_users: "molecule:$apr1$molecule$71DtE3xj/6PCMkh0SmxZ61"
     pihole_verify_timezone: Asia/Tokyo
     pihole_verify_timezone_abbreviation: JST
 
@@ -49,22 +50,31 @@
     pihole_verify_local_record_address: 203.0.113.10
     pihole_verify_blocked_name: blocked.molecule.test
 
-    # Asks the published UDP port for the A record of the name it is given,
-    # with a hand-built DNS packet, because the test container ships neither
-    # `dig` nor `nslookup`.
+    # Asks the published port (`udp` or `tcp`) for the A record of the name it
+    # is given, with a hand-built DNS packet, because the test container ships
+    # neither `dig` nor `nslookup`.
     pihole_verify_dns_query_script: |
       import socket
       import sys
 
+      name, protocol = sys.argv[1], sys.argv[2]
+
       query = b"\xab\xcd\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
-      for label in sys.argv[1].split("."):
+      for label in name.split("."):
           query += bytes([len(label)]) + label.encode()
       query += b"\x00\x00\x01\x00\x01"
 
-      sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-      sock.settimeout(5)
-      sock.sendto(query, ("127.0.0.1", 53))
-      response, _ = sock.recvfrom(4096)
+      if protocol == "tcp":
+          # Over TCP, each message is preceded by its length.
+          stream = socket.create_connection(("127.0.0.1", 53), timeout=5).makefile("rwb")
+          stream.write(len(query).to_bytes(2, "big") + query)
+          stream.flush()
+          response = stream.read(int.from_bytes(stream.read(2), "big"))
+      else:
+          sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+          sock.settimeout(5)
+          sock.sendto(query, ("127.0.0.1", 53))
+          response, _ = sock.recvfrom(4096)
 
       print("rcode=%d answers=%d address=%s" % (
           response[3] & 0x0F,
@@ -203,6 +213,9 @@
             pihole_data_mount: >-
               {{ (pihole_container_raw.stdout | from_json)[0].Mounts
                  | selectattr('Destination', 'equalto', '/etc/pihole') | list }}
+            pihole_extra_mount: >-
+              {{ (pihole_container_raw.stdout | from_json)[0].Mounts
+                 | selectattr('Destination', 'equalto', pihole_molecule_extra_volume_dst) | list }}
 
         - name: Assert that the container keeps only the capabilities the role grants
           ansible.builtin.assert:
@@ -220,6 +233,30 @@
               - pihole_data_mount[0].RW
             fail_msg: "The data path is not mounted as expected: {{ pihole_container.Mounts }}"
             success_msg: "{{ pihole_verify_data_path }} is mounted at /etc/pihole"
+
+        - name: Assert that pihole_container_additional_volumes_custom reached the container
+          ansible.builtin.assert:
+            that:
+              - pihole_extra_mount | length == 1
+              - pihole_extra_mount[0].Type == 'bind'
+              - pihole_extra_mount[0].Source == pihole_molecule_extra_volume_src
+              - not pihole_extra_mount[0].RW
+            fail_msg: "The additional volume did not reach the container: {{ pihole_container.Mounts }}"
+            success_msg: "The additional volume is mounted read-only at {{ pihole_molecule_extra_volume_dst }}"
+
+        - name: Read the marker through the additional volume
+          ansible.builtin.command:
+            cmd: >-
+              docker exec pihole
+              cat {{ pihole_molecule_extra_volume_dst }}/{{ pihole_molecule_marker_filename }}
+          register: pihole_extra_volume
+          changed_when: false
+
+        - name: Assert the additional volume is mounted into the Pi-hole container
+          ansible.builtin.assert:
+            that: pihole_extra_volume.stdout | trim == pihole_molecule_extra_volume_marker
+            fail_msg: "The additional volume did not carry the marker into the container"
+            success_msg: "The additional volume carries the marker into the container"
 
         - name: Assert that the container image is the pinned version
           ansible.builtin.assert:
@@ -258,13 +295,25 @@
             fail_msg: "The Traefik labels are not what templates/labels.j2 should have produced: {{ pihole_container.Config.Labels }}"
             success_msg: "The Traefik labels route {{ pihole_verify_hostname }}{{ pihole_verify_path_prefix }} to port {{ pihole_verify_http_port }}"
 
-        # Traefik replaces a header the service sends with the one it is told to
-        # add, and Pi-hole sends a stricter Content-Security-Policy itself.
-        - name: Assert that Traefik is not told to replace Pi-hole's Content-Security-Policy
+        # Defining the middleware is not enough: Traefik only applies the ones the
+        # router lists, so the router has to carry it too.
+        - name: Assert that the basic-auth middleware is defined and attached to the Pi-hole router
           ansible.builtin.assert:
-            that: "'traefik.http.middlewares.pihole-add-response-headers.headers.customresponseheaders.Content-Security-Policy' not in pihole_container.Config.Labels"
-            fail_msg: "The labels set a Content-Security-Policy: {{ pihole_container.Config.Labels }}"
-            success_msg: "The labels leave Pi-hole's own Content-Security-Policy alone"
+            that:
+              - pihole_container.Config.Labels['traefik.http.middlewares.pihole-basic-auth.basicauth.users'] == pihole_verify_basic_auth_users
+              - "'pihole-basic-auth' in pihole_container.Config.Labels['traefik.http.routers.pihole.middlewares'].split(',')"
+            fail_msg: "The basic-auth middleware is missing or not attached to the router: {{ pihole_container.Config.Labels }}"
+            success_msg: "The basic-auth middleware is defined and attached to the Pi-hole router"
+
+        # Traefik replaces a header the service sends with the one it is told to
+        # add, and Pi-hole sends better values of these itself.
+        - name: Assert that Traefik is not told to replace Pi-hole's own security headers
+          ansible.builtin.assert:
+            that:
+              - "'traefik.http.middlewares.pihole-add-response-headers.headers.customresponseheaders.Content-Security-Policy' not in pihole_container.Config.Labels"
+              - "'traefik.http.middlewares.pihole-add-response-headers.headers.customresponseheaders.X-XSS-Protection' not in pihole_container.Config.Labels"
+            fail_msg: "The labels set Content-Security-Policy or X-XSS-Protection: {{ pihole_container.Config.Labels }}"
+            success_msg: "The labels leave Pi-hole's own Content-Security-Policy and X-XSS-Protection alone"
 
         # ------------------------------------------------------------------
         # What the process inside the container actually sees and does
@@ -272,10 +321,12 @@
 
         # The container starts as root, so its own user says nothing. The image's
         # entrypoint has to have given its `pihole` user the role's uid and gid, and
-        # started Pi-hole's DNS and web server (pihole-FTL) as that user.
+        # started Pi-hole's DNS and web server (pihole-FTL) as that user. The
+        # image's health check runs short-lived `pihole-FTL --config` processes
+        # as well, so the oldest one is the server.
         - name: Ask the Pi-hole container which timezone and user pihole-FTL runs in
           ansible.builtin.command:
-            cmd: docker exec pihole sh -c 'date +%Z; stat -c %u /proc/$(pidof pihole-FTL); stat -c %g /proc/$(pidof pihole-FTL)'
+            cmd: docker exec pihole sh -c 'pid=$(pgrep -o -x pihole-FTL); date +%Z; stat -c %u /proc/$pid; stat -c %g /proc/$pid'
           register: pihole_process_identity
           changed_when: false
 
@@ -296,27 +347,45 @@
         # The DNS server is the point of this role, and it is a separate listener
         # from the web interface. Pi-hole answers this name from the local record,
         # so no upstream DNS server or internet access is involved.
-        - name: Resolve the local DNS record through Pi-hole (up to 60s)
+        - name: Resolve the local DNS record through Pi-hole over UDP (up to 60s)
           ansible.builtin.command:
             argv:
               - python3
               - -c
               - "{{ pihole_verify_dns_query_script }}"
               - "{{ pihole_verify_local_record_name }}"
+              - udp
           register: pihole_dns_local_record
           changed_when: false
           until: "('address=' ~ pihole_verify_local_record_address) in pihole_dns_local_record.stdout"
           retries: 12
           delay: 5
 
-        - name: Assert Pi-hole answered with the local DNS record
+        # The TCP port is published separately, so it is asked separately.
+        - name: Resolve the local DNS record through Pi-hole over TCP
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -c
+              - "{{ pihole_verify_dns_query_script }}"
+              - "{{ pihole_verify_local_record_name }}"
+              - tcp
+          register: pihole_dns_local_record_tcp
+          changed_when: false
+
+        - name: Assert Pi-hole answered with the local DNS record over UDP and TCP
           ansible.builtin.assert:
             that:
-              - "'rcode=0' in pihole_dns_local_record.stdout"
-              - "'answers=1' in pihole_dns_local_record.stdout"
-              - "('address=' ~ pihole_verify_local_record_address) in pihole_dns_local_record.stdout"
-            fail_msg: "Pi-hole did not answer with the local DNS record ({{ pihole_dns_local_record.stdout }})"
-            success_msg: "Pi-hole answered with the local DNS record ({{ pihole_dns_local_record.stdout }})"
+              - "'rcode=0' in item.stdout"
+              - "'answers=1' in item.stdout"
+              - "('address=' ~ pihole_verify_local_record_address) in item.stdout"
+            fail_msg: "Pi-hole did not answer with the local DNS record ({{ item.stdout }})"
+            success_msg: "Pi-hole answered with the local DNS record ({{ item.stdout }})"
+          loop:
+            - "{{ pihole_dns_local_record }}"
+            - "{{ pihole_dns_local_record_tcp }}"
+          loop_control:
+            label: "{{ item.cmd[-1] }}"
 
         # Blocking is what Pi-hole is for. Adding a name through the API and then
         # seeing the DNS server block it also ties the two listeners together. An
@@ -343,6 +412,7 @@
               - -c
               - "{{ pihole_verify_dns_query_script }}"
               - "{{ pihole_verify_blocked_name }}"
+              - udp
           register: pihole_dns_blocked
           changed_when: false
           until: "'address=0.0.0.0' in pihole_dns_blocked.stdout"
@@ -420,7 +490,7 @@
               - "Pi-hole systemd: {% for unit, state in pihole_verify_units | zip(pihole_services.results | map(attribute='status.ActiveState')) %}{{ unit }} ({{ state }}){% if not loop.last %}, {% endif %}{% endfor %}"
               - "Pi-hole version: {{ pihole_version_info.json.version.docker.local }}"
               - "Pi-hole start page redirect: {{ pihole_start_page.location }}"
-              - "Pi-hole DNS (local record): {{ pihole_dns_local_record.stdout }}"
+              - "Pi-hole DNS (local record): {{ pihole_dns_local_record.stdout }} (UDP), {{ pihole_dns_local_record_tcp.stdout }} (TCP)"
               - "Pi-hole DNS (denied name): {{ pihole_dns_blocked.stdout }}"
               - "Pi-hole gravity database: {{ pihole_verify_data_path }}/gravity.db"
 
@@ -439,3 +509,15 @@
         - name: Fail because verification did not pass
           ansible.builtin.fail:
             msg: "Pi-hole verification failed. The systemd service log is printed above."
+
+      always:
+        # Pi-hole keeps only 16 API sessions at a time, so a session left behind
+        # by every verify run against the same instance would lock later ones out.
+        - name: Log out of the Pi-hole API
+          when: pihole_auth.json.session.sid | default('', true) | length > 0
+          ansible.builtin.uri:
+            url: "{{ pihole_verify_api_url }}/auth"
+            method: DELETE
+            headers:
+              sid: "{{ pihole_auth.json.session.sid }}"
+            status_code: [204]
