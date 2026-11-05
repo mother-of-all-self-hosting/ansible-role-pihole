@@ -1,0 +1,85 @@
+# SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2025 spatterlight
+# SPDX-FileCopyrightText: 2025, 2026 Suguru Hirahara
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Check existence of Pi-hole systemd service
+  ansible.builtin.stat:
+    path: "{{ devture_systemd_docker_base_systemd_path }}/{{ pihole_identifier }}.service"
+  register: pihole_service_stat
+
+- name: Uninstall Pi-hole systemd services and files
+  when: pihole_service_stat.stat.exists | bool
+  block:
+    - name: Ensure Pi-hole systemd service is stopped
+      ansible.builtin.service:
+        name: "{{ pihole_identifier }}"
+        state: stopped
+        enabled: false
+        daemon_reload: true
+
+    - name: Ensure Pi-hole systemd service does not exist
+      ansible.builtin.file:
+        path: "{{ devture_systemd_docker_base_systemd_path }}/{{ pihole_identifier }}.service"
+        state: absent
+
+    - name: Ensure Pi-hole support files do not exist
+      ansible.builtin.file:
+        path: "{{ pihole_base_path }}/{{ item }}"
+        state: absent
+      with_items:
+        - env
+        - labels
+
+    - name: Ensure Pi-hole local data path does not exist if empty
+      ansible.builtin.command:
+        cmd: "rmdir {{ pihole_data_path }}"
+      register: pihole_data_path_deletion_result
+      changed_when: pihole_data_path_deletion_result.rc == 0
+      failed_when: false
+
+    - name: Ensure Pi-hole base path does not exist if empty
+      ansible.builtin.command:
+        cmd: "rmdir {{ pihole_base_path }}"
+      register: pihole_base_path_deletion_result
+      changed_when: pihole_base_path_deletion_result.rc == 0
+      failed_when: false
+
+    - name: Ensure Pi-hole container network does not exist
+      when: pihole_container_network_deletion_enabled
+      block:
+        - name: Ensure Pi-hole container network does not exist via community.docker.docker_network
+          when: devture_systemd_docker_base_container_network_creation_method == 'ansible-module'
+          community.docker.docker_network:
+            name: "{{ pihole_container_network }}"
+            state: absent
+          register: pihole_network_deletion_result
+
+        - name: Ensure Pi-hole container network does not exist via ansible.builtin.command
+          when: devture_systemd_docker_base_container_network_creation_method == 'command'
+          ansible.builtin.command:
+            cmd: >-
+              {{ devture_systemd_docker_base_host_command_docker }} network rm
+              {{ pihole_container_network }}
+          register: pihole_network_deletion_result
+          changed_when: pihole_container_network in pihole_network_deletion_result.stdout
+
+- name: Check existence of Pi-hole local data path
+  ansible.builtin.stat:
+    path: "{{ pihole_data_path }}"
+  register: pihole_data_path_stat
+
+# We just want to notify the user. Deleting data is too destructive.
+- name: Inject the message about the remaining Pi-hole local data path
+  when: pihole_data_path_stat.stat.exists | bool
+  ansible.builtin.set_fact:
+    devture_playbook_runtime_messages_list: |
+      {{
+        devture_playbook_runtime_messages_list | default([])
+        +
+        [
+          "Note: As the local Pi-hole instance has been removed, some old data remains in `" + pihole_data_path + "`. Feel free to delete it."
+        ]
+      }}

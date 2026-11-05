@@ -1,0 +1,91 @@
+# SPDX-FileCopyrightText: 2023-2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2025 spatterlight
+# SPDX-FileCopyrightText: 2025, 2026 Suguru Hirahara
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Ensure Pi-hole paths exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ pihole_uid }}"
+    group: "{{ pihole_gid }}"
+    mode: "{{ item.mode }}"
+  with_items:
+    - path: "{{ pihole_base_path }}"
+      mode: "0750"
+    # Using `0755` here, because the image's entrypoint sets this mode on the
+    # directory every time it starts. The base path above keeps it private.
+    - path: "{{ pihole_data_path }}"
+      mode: "0755"
+
+- name: Ensure Pi-hole support files installed
+  ansible.builtin.template:
+    src: "{{ role_path }}/templates/{{ item }}.j2"
+    dest: "{{ pihole_base_path }}/{{ item }}"
+    mode: "0640"
+    owner: "{{ pihole_uid }}"
+    group: "{{ pihole_gid }}"
+  with_items:
+    - env
+    - labels
+  register: pihole_support_files_result
+
+- name: Ensure Pi-hole container image is pulled via community.docker.docker_image_pull
+  when: devture_systemd_docker_base_container_image_pull_method == 'ansible-module'
+  community.docker.docker_image_pull:
+    name: "{{ pihole_container_image }}"
+    pull: always
+  register: pihole_container_image_pull_result_ansible_module
+  retries: "{{ devture_playbook_help_container_retries_count }}"
+  delay: "{{ devture_playbook_help_container_retries_delay }}"
+  until: pihole_container_image_pull_result_ansible_module is not failed
+
+- name: Ensure Pi-hole container image is pulled via ansible.builtin.command
+  when: devture_systemd_docker_base_container_image_pull_method == 'command'
+  ansible.builtin.command:
+    cmd: "{{ devture_systemd_docker_base_host_command_docker }} pull {{ pihole_container_image }}"
+  register: pihole_container_image_pull_result_command
+  retries: "{{ devture_playbook_help_container_retries_count }}"
+  delay: "{{ devture_playbook_help_container_retries_delay }}"
+  until: pihole_container_image_pull_result_command is not failed
+  changed_when: "'Downloaded newer image' in pihole_container_image_pull_result_command.stdout"
+
+- name: Ensure Pi-hole container network is created via community.docker.docker_network
+  when: devture_systemd_docker_base_container_network_creation_method == 'ansible-module'
+  community.docker.docker_network:
+    enable_ipv6: "{{ devture_systemd_docker_base_ipv6_enabled }}"
+    name: "{{ pihole_container_network }}"
+    driver: bridge
+    driver_options: "{{ devture_systemd_docker_base_container_networks_driver_options }}"
+  register: pihole_network_creation_result
+
+- name: Ensure Pi-hole container network is created via ansible.builtin.command
+  when: devture_systemd_docker_base_container_network_creation_method == 'command'
+  ansible.builtin.command:
+    cmd: >-
+      {{ devture_systemd_docker_base_host_command_docker }} network create
+      {% if devture_systemd_docker_base_ipv6_enabled %}--ipv6{% endif %}
+      {{ devture_systemd_docker_base_container_networks_driver_options_string }}
+      {{ pihole_container_network }}
+  register: pihole_network_creation_result
+  changed_when: pihole_network_creation_result.rc == 0
+  failed_when: pihole_network_creation_result.rc != 0 and 'already exists' not in pihole_network_creation_result.stderr
+
+- name: Ensure Pi-hole systemd service is present
+  ansible.builtin.template:
+    src: "{{ role_path }}/templates/systemd/pihole.service.j2"
+    dest: "{{ devture_systemd_docker_base_systemd_path }}/{{ pihole_identifier }}.service"
+    mode: "0644"
+  register: pihole_systemd_service_result
+
+- name: Determine whether Pi-hole needs a restart
+  ansible.builtin.set_fact:
+    pihole_restart_necessary: >-
+      {{
+        pihole_support_files_result.changed | default(false)
+        or pihole_systemd_service_result.changed | default(false)
+        or pihole_container_image_pull_result_ansible_module.changed | default(false)
+        or pihole_container_image_pull_result_command.changed | default(false)
+      }}

@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2025 spatterlight
+# SPDX-FileCopyrightText: 2025, 2026 Suguru Hirahara
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Perform Pi-hole installation tasks
+  when: pihole_enabled | bool
+  tags:
+    - setup-all
+    - setup-pihole
+    - install-all
+    - install-pihole
+  block:
+    - name: Validate Pi-hole configuration
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/validate_config.yml"
+    - name: Install Pi-hole
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/install.yml"
+
+- name: Perform Pi-hole uninstallation tasks
+  when: not pihole_enabled | bool
+  tags:
+    - setup-all
+    - setup-pihole
+  block:
+    - name: Uninstall Pi-hole
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/uninstall.yml"

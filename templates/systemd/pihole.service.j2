@@ -1,0 +1,80 @@
+{#
+SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+SPDX-FileCopyrightText: 2024 Nikita Chernyi
+SPDX-FileCopyrightText: 2025, 2026 spatterlight
+SPDX-FileCopyrightText: 2025, 2026 Suguru Hirahara
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
+
+[Unit]
+Description=Pi-hole ({{ pihole_identifier }})
+{% for service in pihole_systemd_required_services_list %}
+Requires={{ service }}
+After={{ service }}
+{% endfor %}
+{% for service in pihole_systemd_wanted_services_list %}
+Wants={{ service }}
+{% endfor %}
+DefaultDependencies=no
+
+[Service]
+Type=simple
+Environment="HOME={{ devture_systemd_docker_base_systemd_unit_home_path }}"
+ExecStartPre={{ devture_systemd_docker_base_host_command_sh }} -c '{{ pihole_container_cleanup_command | trim | replace("\n", " ") }}'
+
+ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} create \
+      --rm \
+      --name={{ pihole_identifier }} \
+      --log-driver=none \
+      {# The image's entrypoint has to start as root: it gives the `pihole` user
+         the role's uid and gid (see `env.j2`), takes over the data path, sets file
+         capabilities on pihole-FTL, and then starts it as that user and stops it
+         on shutdown. These are the capabilities it needs for that and for binding
+         the DNS port. It also writes to the image's own files, so the container
+         cannot be read-only. #}
+      --cap-drop=ALL \
+      --cap-add=CHOWN \
+      --cap-add=DAC_OVERRIDE \
+      --cap-add=FOWNER \
+      --cap-add=KILL \
+      --cap-add=NET_BIND_SERVICE \
+      --cap-add=SETFCAP \
+      --cap-add=SETGID \
+      --cap-add=SETUID \
+      --network={{ pihole_container_network }} \
+      {% if pihole_container_http_host_bind_port %}
+      -p {{ pihole_container_http_host_bind_port }}:{{ pihole_container_http_port }} \
+      {% endif %}
+      {% if pihole_container_dns_tcp_bind_port %}
+      -p {{ pihole_container_dns_tcp_bind_port }}:53/tcp \
+      {% endif %}
+      {% if pihole_container_dns_udp_bind_port %}
+      -p {{ pihole_container_dns_udp_bind_port }}:53/udp \
+      {% endif %}
+      --env-file={{ pihole_base_path }}/env \
+      --label-file={{ pihole_base_path }}/labels \
+      --mount type=bind,src={{ pihole_data_path }},dst=/etc/pihole \
+      {% for volume in pihole_container_additional_volumes %}
+      --mount type={{ volume.type | default('bind' if '/' in volume.src else 'volume') }},src={{ volume.src }},dst={{ volume.dst }}{{ (',' + volume.options) if volume.options | default('') else '' }} \
+      {% endfor %}
+      {% for arg in pihole_container_extra_arguments %}
+      {{ arg }} \
+      {% endfor %}
+      {{ pihole_container_image }}
+
+{% for network in pihole_container_additional_networks %}
+ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} network connect {{ network }} {{ pihole_identifier }}
+{% endfor %}
+
+ExecStart={{ devture_systemd_docker_base_host_command_docker }} start --attach {{ pihole_identifier }}
+
+ExecStop=-{{ devture_systemd_docker_base_host_command_sh }} -c '{{ devture_systemd_docker_base_host_command_docker }} stop -t {{ pihole_container_stop_grace_time_seconds }} {{ pihole_identifier }} 2>/dev/null || true'
+ExecStop=-{{ devture_systemd_docker_base_host_command_sh }} -c '{{ devture_systemd_docker_base_host_command_docker }} rm {{ pihole_identifier }} 2>/dev/null || true'
+
+Restart=always
+RestartSec=30
+SyslogIdentifier={{ pihole_identifier }}
+
+[Install]
+WantedBy=multi-user.target
