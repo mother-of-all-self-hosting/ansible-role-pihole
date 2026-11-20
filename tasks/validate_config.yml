@@ -13,7 +13,6 @@
   with_items:
     - pihole_uid
     - pihole_gid
-    - pihole_hostname
     - pihole_environment_variables_ftlconf_webserver_api_password
 
 # Pi-hole answers every client that reaches it, and Docker publishes a port given
